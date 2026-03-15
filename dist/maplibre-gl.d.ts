@@ -2602,7 +2602,8 @@ export declare class VectorTileSource extends Evented implements Source {
 	 * deepest tile at source max zoom to generate sub tiles using geojsonvt for highest performance on vector overscaling
 	 */
 	private _getOverzoomParameters;
-	private _processQueuedReloadIfRetained;
+	private _enqueueReloadForLoadingTile;
+	private _drainQueuedReloadIfTileRetained;
 	private _afterTileLoadWorkerResponse;
 	abortTile(tile: Tile): Promise<void>;
 	unloadTile(tile: Tile): Promise<void>;

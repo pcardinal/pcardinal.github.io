@@ -1,6 +1,6 @@
 /**
  * MapLibre GL JS
- * @license 3-Clause BSD. Full text of license: https://github.com/maplibre/maplibre-gl-js/blob/v5.20.0/LICENSE.txt
+ * @license 3-Clause BSD. Full text of license: https://github.com/maplibre/maplibre-gl-js/blob/v5.20.1/LICENSE.txt
  */
 var maplibregl = (function () {
 'use strict';
@@ -43909,10 +43909,13 @@ class TileCache {
         }
     }
     abortAllRequests() {
-        var _a, _b;
+        var _a;
         for (const [, entries] of Object.entries(this.data)) {
             for (const entry of entries) {
-                (_b = (_a = entry.value) === null || _a === void 0 ? void 0 : _a.abortController) === null || _b === void 0 ? void 0 : _b.abort();
+                if (!entry.value)
+                    continue;
+                entry.value.aborted = true;
+                (_a = entry.value.abortController) === null || _a === void 0 ? void 0 : _a.abort();
             }
         }
     }

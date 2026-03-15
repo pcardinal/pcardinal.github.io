@@ -1,6 +1,6 @@
 /**
  * MapLibre GL JS
- * @license 3-Clause BSD. Full text of license: https://github.com/maplibre/maplibre-gl-js/blob/v5.20.0/LICENSE.txt
+ * @license 3-Clause BSD. Full text of license: https://github.com/maplibre/maplibre-gl-js/blob/v5.20.1/LICENSE.txt
  */
 (function (global, factory) {
 typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports) :
@@ -10,7 +10,7 @@ typeof define === 'function' && define.amd ? define(['exports'], factory) :
 
 var name = "maplibre-gl";
 var description = "BSD licensed community fork of mapbox-gl, a WebGL interactive maps library";
-var version$2 = "5.20.0";
+var version$2 = "5.20.1";
 var main = "dist/maplibre-gl.js";
 var style = "dist/maplibre-gl.css";
 var license = "BSD-3-Clause";
@@ -32,7 +32,7 @@ var dependencies = {
 	"@mapbox/unitbezier": "^0.0.1",
 	"@mapbox/vector-tile": "^2.0.4",
 	"@mapbox/whoots-js": "^3.1.0",
-	"@maplibre/geojson-vt": "^6.0.1",
+	"@maplibre/geojson-vt": "^6.0.2",
 	"@maplibre/maplibre-gl-style-spec": "^24.7.0",
 	"@maplibre/mlt": "^1.1.7",
 	"@maplibre/vt-pbf": "^4.3.0",
@@ -66,7 +66,7 @@ var devDependencies = {
 	"@types/minimist": "^1.2.5",
 	"@types/murmurhash-js": "^1.0.6",
 	"@types/nise": "^1.4.5",
-	"@types/node": "^25.3.5",
+	"@types/node": "^25.4.0",
 	"@types/offscreencanvas": "^2019.7.3",
 	"@types/pixelmatch": "^5.2.6",
 	"@types/pngjs": "^6.0.5",
@@ -75,11 +75,11 @@ var devDependencies = {
 	"@types/request": "^2.48.13",
 	"@types/shuffle-seed": "^1.1.3",
 	"@types/window-or-global": "^1.0.6",
-	"@typescript-eslint/eslint-plugin": "^8.56.1",
+	"@typescript-eslint/eslint-plugin": "^8.57.0",
 	"@typescript-eslint/parser": "^8.55.0",
 	"@unicode/unicode-17.0.0": "^1.6.16",
 	"@vitest/coverage-v8": "4.0.18",
-	"@vitest/eslint-plugin": "^1.6.9",
+	"@vitest/eslint-plugin": "^1.6.10",
 	"@vitest/ui": "4.0.18",
 	address: "^2.0.3",
 	autoprefixer: "^10.4.27",
@@ -89,7 +89,7 @@ var devDependencies = {
 	cssnano: "^7.1.3",
 	d3: "^7.9.0",
 	"d3-queue": "^3.0.7",
-	"devtools-protocol": "^0.0.1595872",
+	"devtools-protocol": "^0.0.1596832",
 	diff: "^8.0.3",
 	"dts-bundle-generator": "^9.5.1",
 	eslint: "^9.39.2",
@@ -97,7 +97,7 @@ var devDependencies = {
 	"eslint-plugin-import": "^2.32.0",
 	"eslint-plugin-react": "^7.37.5",
 	"eslint-plugin-tsdoc": "0.5.2",
-	expect: "^30.2.0",
+	expect: "^30.3.0",
 	glob: "^13.0.6",
 	globals: "^17.4.0",
 	"is-builtin-module": "^5.0.0",
@@ -39026,9 +39026,6 @@ class TileBounds {
     }
 }
 
-function hasRenderableState(tile) {
-    return tile.state === 'loaded' || tile.state === 'reloading' || tile.state === 'expired';
-}
 /**
  * A source containing vector tiles in [Maplibre Vector Tile format](https://maplibre.org/maplibre-tile-spec/) or [Mapbox Vector Tile format](https://docs.mapbox.com/vector-tiles/reference/).
  * (See the [Style Specification](https://maplibre.org/maplibre-style-spec/) for detailed documentation of options.)
@@ -39173,7 +39170,7 @@ class VectorTileSource extends Evented {
     }
     loadTile(tile) {
         return __awaiter(this, void 0, void 0, function* () {
-            const wasRenderableBeforeLoad = hasRenderableState(tile);
+            const wasRenderableBeforeLoad = tile.hasData();
             const url = tile.tileID.canonical.url(this.tiles, this.map.getPixelRatio(), this.scheme);
             const params = {
                 request: this.map._requestManager.transformRequest(url, "Tile" /* ResourceType.Tile */),
@@ -39198,24 +39195,7 @@ class VectorTileSource extends Evented {
                 messageType = "LT" /* MessageType.loadTile */;
             }
             else if (tile.state === 'loading') {
-                const pendingReload = tile.reloadPromise;
-                return new Promise((resolve, reject) => {
-                    if (pendingReload) {
-                        tile.reloadPromise = {
-                            resolve: () => {
-                                pendingReload.resolve();
-                                resolve();
-                            },
-                            reject: () => {
-                                pendingReload.reject();
-                                reject();
-                            }
-                        };
-                    }
-                    else {
-                        tile.reloadPromise = { resolve, reject };
-                    }
-                });
+                return this._enqueueReloadForLoadingTile(tile);
             }
             tile.aborted = false;
             tile.abortController = new AbortController();
@@ -39226,7 +39206,7 @@ class VectorTileSource extends Evented {
                     if (!wasRenderableBeforeLoad) {
                         tile.state = 'unloaded';
                     }
-                    this._processQueuedReloadIfRetained(tile);
+                    this._drainQueuedReloadIfTileRetained(tile);
                     return;
                 }
                 this._afterTileLoadWorkerResponse(tile, data);
@@ -39241,7 +39221,7 @@ class VectorTileSource extends Evented {
                     if (!wasRenderableBeforeLoad) {
                         tile.state = 'unloaded';
                     }
-                    this._processQueuedReloadIfRetained(tile);
+                    this._drainQueuedReloadIfTileRetained(tile);
                     return;
                 }
                 if (err && err.status !== 404) {
@@ -39269,7 +39249,28 @@ class VectorTileSource extends Evented {
             overzoomRequest: this.map._requestManager.transformRequest(maxZoomTileUrl, "Tile" /* ResourceType.Tile */)
         };
     }
-    _processQueuedReloadIfRetained(tile) {
+    _enqueueReloadForLoadingTile(tile) {
+        const previousQueuedReload = tile.reloadPromise;
+        return new Promise((resolve, reject) => {
+            if (!previousQueuedReload) {
+                tile.reloadPromise = { resolve, reject };
+                return;
+            }
+            // Keep all callers waiting for a reload while this tile is already loading.
+            // Resolve/reject cascades so every queued caller settles when the queued reload completes.
+            tile.reloadPromise = {
+                resolve: () => {
+                    previousQueuedReload.resolve();
+                    resolve();
+                },
+                reject: () => {
+                    previousQueuedReload.reject();
+                    reject();
+                }
+            };
+        });
+    }
+    _drainQueuedReloadIfTileRetained(tile) {
         return __awaiter(this, void 0, void 0, function* () {
             if (!tile.reloadPromise)
                 return;
@@ -39299,12 +39300,12 @@ class VectorTileSource extends Evented {
         }
         tile.etag = data === null || data === void 0 ? void 0 : data.etag;
         tile.loadVectorData(data, this.map.painter);
-        this._processQueuedReloadIfRetained(tile);
+        this._drainQueuedReloadIfTileRetained(tile);
     }
     abortTile(tile) {
         return __awaiter(this, void 0, void 0, function* () {
             tile.aborted = true;
-            if (!hasRenderableState(tile)) {
+            if (!tile.hasData()) {
                 tile.state = 'unloaded';
             }
             if (tile.abortController) {
@@ -47419,10 +47420,13 @@ class TileCache {
         }
     }
     abortAllRequests() {
-        var _a, _b;
+        var _a;
         for (const [, entries] of Object.entries(this.data)) {
             for (const entry of entries) {
-                (_b = (_a = entry.value) === null || _a === void 0 ? void 0 : _a.abortController) === null || _b === void 0 ? void 0 : _b.abort();
+                if (!entry.value)
+                    continue;
+                entry.value.aborted = true;
+                (_a = entry.value.abortController) === null || _a === void 0 ? void 0 : _a.abort();
             }
         }
     }
@@ -48212,7 +48216,7 @@ class TileManager extends Evented {
             const tile = this._inViewTiles.getTileById(id);
             if (!tile)
                 continue;
-            const hasInFlightRequest = tile.state === 'loading' || !!tile.abortController;
+            const hasInFlightRequest = tile.state === 'loading' || tile.abortController != null;
             if (!hasInFlightRequest)
                 continue;
             tile.aborted = true;
@@ -63155,7 +63159,6 @@ function drawRaster(painter, tileManager, layer, tileIDs, renderOptions) {
     }
 }
 function drawTiles(painter, tileManager, layer, coords, stencilModes, useBorder, allowPoles, corners, flipCullfaceMode = false, isRenderingToTexture = false) {
-    var _a;
     const minTileZ = coords[coords.length - 1].overscaledZ;
     const context = painter.context;
     const gl = context.gl;
@@ -63165,8 +63168,8 @@ function drawTiles(painter, tileManager, layer, coords, stencilModes, useBorder,
     const colorMode = painter.colorModeForRenderPass();
     const align = !painter.options.moving;
     const rasterOpacity = layer.paint.get('raster-opacity');
-    const resampling = (_a = layer.paint.get('resampling')) !== null && _a !== void 0 ? _a : layer.paint.get('raster-resampling');
-    const textureFilter = resampling === 'nearest' ? gl.NEAREST : gl.LINEAR;
+    const useNearest = layer.paint.get('resampling') === 'nearest' || layer.paint.get('raster-resampling') === 'nearest';
+    const textureFilter = useNearest ? gl.NEAREST : gl.LINEAR;
     const fadeDuration = layer.paint.get('raster-fade-duration');
     const isTerrain = !!painter.style.map.terrain;
     // Draw all tiles
