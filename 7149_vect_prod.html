@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>MapLibre Vector Protocol Abort Repro</title>
+
+        <link rel="stylesheet" href="https://pcardinal.github.io/dist/maplibre-gl.css" />
+        <script src="https://pcardinal.github.io/dist/maplibre-gl-dev.js"></script>
+        <script src="https://unpkg.com/pbf@3.2.1/dist/pbf.js"></script>
+
+        <style>
+            html, body, #map { margin: 0; padding: 0; height: 100%; }
+            #controls {
+                position: absolute;
+                top: 10px;
+                left: 10px;
+                z-index: 1;
+                background: white;
+                padding: 15px;
+                border-radius: 4px;
+                box-shadow: 0 0 10px rgba(0,0,0,.2);
+                max-width: 320px;
+                font-family: sans-serif;
+            }
+            button { padding: 8px 12px; cursor: pointer; width: 100%; }
+        </style>
+    </head>
+
+    <body>
+        <div id="controls">
+            <h3>Vector Abort Repro</h3>
+            <p>Verifie si les requetes vectorielles en vol sont annulees apres <code>source.setUrl()</code>.</p>
+            <ol>
+                <li>Ouvrir la console.</li>
+                <li>Cliquer rapidement plusieurs fois sur le bouton.</li>
+                <li>Les anciennes versions doivent passer en <strong>ABORTED</strong>.</li>
+            </ol>
+            <button id="update-url">Call source.setUrl()</button>
+        </div>
+
+        <div id="map"></div>
+
+        <script>
+            function sleepAbortable(ms, signal) {
+                return new Promise((resolve, reject) => {
+                    const id = setTimeout(resolve, ms);
+                    signal.addEventListener('abort', () => {
+                        clearTimeout(id);
+                        reject(new DOMException('Aborted', 'AbortError'));
+                    }, {once: true});
+                });
+            }
+
+            function zz(n) {
+                return (n << 1) ^ (n >> 31);
+            }
+
+            function writeFeature(feature, pbf) {
+                if (feature.id != null) pbf.writeVarintField(1, feature.id);
+                if (feature.tags?.length) pbf.writePackedVarint(2, feature.tags);
+                pbf.writeVarintField(3, feature.type);          // 3 = Polygon
+                pbf.writePackedVarint(4, feature.geometry);     // command stream
+            }
+
+            function writeLayer(layer, pbf) {
+                pbf.writeStringField(1, layer.name);
+                for (const feature of layer.features) {
+                    pbf.writeMessage(2, writeFeature, feature);
+                }
+                pbf.writeVarintField(5, layer.extent ?? 4096);
+                pbf.writeVarintField(15, layer.version ?? 2);
+            }
+
+            function createVectorTileBuffer(version) {
+                const v = Number.parseInt(version, 10) || 0;
+                const shift = (v % 5) * 200;
+
+                // Variation de couleur: on encode la version dans le feature id.
+                // Le style "fill-color" fera un match sur cet id.
+                const colorId = (v % 6) + 1;
+
+                const x1 = 512 + shift,  y1 = 512 + shift;
+                const x2 = 3072 + shift, y2 = 512 + shift;
+                const x3 = 3072 + shift, y3 = 3072 + shift;
+                const x4 = 512 + shift,  y4 = 3072 + shift;
+
+                // MoveTo(1), LineTo(3), ClosePath(1)
+                const geometry = [
+                    9,  zz(x1), zz(y1),
+                    26, zz(x2 - x1), zz(y2 - y1), zz(x3 - x2), zz(y3 - y2), zz(x4 - x3), zz(y4 - y3),
+                    15
+                ];
+
+                const layer = {
+                    name: 'default',
+                    version: 2,
+                    extent: 4096,
+                    features: [{id: colorId, type: 3, geometry}]
+                };
+
+                const pbf = new Pbf();
+                pbf.writeMessage(3, writeLayer, layer);
+                const bytes = pbf.finish();
+                return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+            }
+
+            maplibregl.addProtocol('repro-vector', async (params, abortController) => {
+                const url = params.url;
+                const reqUrl = new URL(url);
+                const reqType = params.type || reqUrl.searchParams.get('type') || 'unknown';
+                const version = reqUrl.searchParams.get('v') || '0';
+
+                console.log(`%c[Protocol] Start (${reqType}): ${url}`, 'color: blue');
+
+                abortController.signal.addEventListener('abort', () => {
+                    console.warn(`%c[Protocol] ABORTED (${reqType}): ${url}`, 'color: red; font-weight: bold;');
+                }, {once: true});
+
+                const delay = reqType === 'json' ? 200 : 2000;
+                try {
+                    await sleepAbortable(delay, abortController.signal);
+                } catch {
+                    return {data: null};
+                }
+
+                if (abortController.signal.aborted) {
+                    console.log(`%c[Protocol] Ignored after delay: ${url}`, 'color: gray');
+                    return {data: null};
+                }
+
+                if (reqType === 'json' || reqUrl.searchParams.get('type') === 'json') {
+                    console.log(`%c[Protocol] Complete (json): ${url}`, 'color: green');
+                    return {
+                        data: {
+                            tilejson: '2.2.0',
+                            tiles: [url.replace('type=json', 'type=tile') + '&z={z}&x={x}&y={y}'],
+                            minzoom: 0,
+                            maxzoom: 14,
+                            vector_layers: [{id: 'default'}]
+                        }
+                    };
+                }
+
+                const buffer = createVectorTileBuffer(version);
+
+                if (abortController.signal.aborted) return {data: null};
+
+                console.log(`%c[Protocol] Complete (${reqType}): ${url}`, 'color: green');
+                return {data: buffer};
+            });
+
+            const map = new maplibregl.Map({
+                container: 'map',
+                style: {
+                    version: 8,
+                    sources: {},
+                    layers: [{id: 'background', type: 'background', paint: {'background-color': '#1f1f1f'}}]
+                },
+                center: [0, 0],
+                zoom: 1
+            });
+
+            let counter = 0;
+
+            map.on('load', () => {
+                console.log('Map loaded. Adding vector source...');
+
+                map.addSource('repro-source', {
+                    type: 'vector',
+                    url: `repro-vector://data?type=json&v=${counter++}`
+                });
+
+                map.addLayer({
+                    id: 'repro-layer',
+                    type: 'fill',
+                    source: 'repro-source',
+                    'source-layer': 'default',
+                    paint: {
+                        'fill-color': [
+                            'match',
+                            ['id'],
+                            1, '#ff595e',
+                            2, '#8ac926',
+                            3, '#1982c4',
+                            4, '#ffca3a',
+                            5, '#6a4c93',
+                            6, '#00b894',
+                            '#00ff88'
+                        ],
+                        'fill-opacity': 0.35,
+                        'fill-outline-color': '#ffffff'
+                    }
+                });
+            });
+
+            document.getElementById('update-url').addEventListener('click', () => {
+                const source = map.getSource('repro-source');
+                if (!source) return;
+
+                const newUrl = `repro-vector://data?type=json&v=${counter++}`;
+                console.log(`%c>>> Calling source.setUrl('${newUrl}')`, 'background:#222;color:#bada55;font-weight:bold;padding:2px 5px;');
+                source.setUrl(newUrl);
+            });
+        </script>
+    </body>
+</html>
