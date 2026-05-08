@@ -3,6 +3,10 @@ import { dotnet } from './_framework/dotnet.js'
 const is_browser = typeof window != "undefined";
 if (!is_browser) throw new Error(`Expected to be running in a browser`);
 
+// Lire le proxy BrowserHost depuis ?proxy=https://xxx.trycloudflare.com
+const params = new URLSearchParams(globalThis.location.search);
+const proxyOrigin = params.get('proxy') ?? globalThis.location.origin;
+
 const dotnetRuntime = await dotnet
     .withDiagnosticTracing(false)
     .create();
@@ -10,7 +14,7 @@ const dotnetRuntime = await dotnet
 const config = dotnetRuntime.getConfig();
 
 try {
-    await dotnetRuntime.runMain(config.mainAssemblyName, [globalThis.location.href]);
+    await dotnetRuntime.runMain(config.mainAssemblyName, [globalThis.location.href, proxyOrigin]);
 } catch (err) {
     console.error("WASM runMain failed:", err);
     const out = document.getElementById("out");
