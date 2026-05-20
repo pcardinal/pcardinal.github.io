@@ -31,6 +31,22 @@
     </div>
 </div>
 <script type='module' src="./main.js"></script>
+<script>
+    // Écoute le chargement complet de la page
+    window.addEventListener('load', function () {
+        // Crée une routine qui va forcer un événement 'resize' toutes les 200ms
+        let counter = 0;
+        const forceResizeInterval = setInterval(function () {
+            window.dispatchEvent(new Event('resize'));
+            counter++;
+            
+            // On arrête après 10 exécutions (2 secondes), le temps que WASM soit prêt
+            if (counter > 10) {
+                clearInterval(forceResizeInterval);
+            }
+        }, 200);
+    });
+</script>
 </body>
 
 </html>
