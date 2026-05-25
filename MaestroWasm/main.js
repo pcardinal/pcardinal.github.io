@@ -14,7 +14,8 @@ const dotnetRuntime = await dotnet
 const config = dotnetRuntime.getConfig();
 
 try {
-    await dotnetRuntime.runMain(config.mainAssemblyName, [globalThis.location.href, proxyOrigin]);
+    let browserCulture = navigator.language || navigator.userLanguage;
+    await dotnetRuntime.runMain(config.mainAssemblyName, [globalThis.location.href, proxyOrigin, browserCulture]);
 } catch (err) {
     console.error("WASM runMain failed:", err);
     const out = document.getElementById("out");
